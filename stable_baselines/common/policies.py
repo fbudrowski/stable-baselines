@@ -29,7 +29,7 @@ def nature_cnn(scaled_images, **kwargs):
     return activ(linear(layer_3, 'fc1', n_hidden=512, init_scale=np.sqrt(2)))
 
 
-def mlp_extractor(flat_observations, net_arch, act_fun):
+def mlp_extractor(flat_observations, net_arch, act_fun, type="joint"):
     """
     Constructs an MLP that receives observations as an input and outputs a latent representation for the policy and
     a value network. The ``net_arch`` parameter allows to specify the amount and size of the hidden layers and how many
@@ -60,6 +60,7 @@ def mlp_extractor(flat_observations, net_arch, act_fun):
 
     # Iterate through the shared layers and build the shared parts of the network
     for idx, layer in enumerate(net_arch):
+        # print("Idx", idx, "Layer", layer)
         if isinstance(layer, int):  # Check that this is a shared layer
             layer_size = layer
             latent = act_fun(linear(latent, "shared_fc{}".format(idx), layer_size, init_scale=np.sqrt(2)))
@@ -80,11 +81,11 @@ def mlp_extractor(flat_observations, net_arch, act_fun):
     for idx, (pi_layer_size, vf_layer_size) in enumerate(zip_longest(policy_only_layers, value_only_layers)):
         if pi_layer_size is not None:
             assert isinstance(pi_layer_size, int), "Error: net_arch[-1]['pi'] must only contain integers."
-            latent_policy = act_fun(linear(latent_policy, "pi_fc{}".format(idx), pi_layer_size, init_scale=np.sqrt(2)))
+            latent_policy = act_fun(linear(latent_policy, "pi_{}_fc{}".format(type,idx), pi_layer_size, init_scale=np.sqrt(2)))
 
         if vf_layer_size is not None:
             assert isinstance(vf_layer_size, int), "Error: net_arch[-1]['vf'] must only contain integers."
-            latent_value = act_fun(linear(latent_value, "vf_fc{}".format(idx), vf_layer_size, init_scale=np.sqrt(2)))
+            latent_value = act_fun(linear(latent_value, "vf_{}_fc{}".format(type, idx), vf_layer_size, init_scale=np.sqrt(2)))
 
     return latent_policy, latent_value
 
