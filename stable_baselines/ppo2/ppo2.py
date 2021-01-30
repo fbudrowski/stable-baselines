@@ -387,6 +387,10 @@ class PPO2(ActorCriticRLModel):
                                                 true_reward.reshape((self.n_envs, self.n_steps)),
                                                 masks.reshape((self.n_envs, self.n_steps)),
                                                 writer, self.num_timesteps)
+                    writer.add_summary({
+                        'eprewmean': safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]),
+                        'eplenmean': safe_mean([ep_info['l'] for ep_info in self.ep_info_buf])
+                    }, self.num_timesteps)
 
                 if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
                     explained_var = explained_variance(values, returns)
