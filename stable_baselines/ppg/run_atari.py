@@ -25,7 +25,9 @@ def train(env_id, num_timesteps, seed, policy,
     policy = {'cnn': PPGCnnPolicy, 'mlp': PPGMlpPolicy}[policy]
     model = PPG(policy=policy, env=env, n_steps=n_steps, nminibatches=nminibatches,
                  lam=0.95, gamma=0.99, noptepochs=4, ent_coef=.01,
-                 learning_rate=lambda f: f * 2.5e-4, cliprange=lambda f: f * 0.1, verbose=1)
+                 learning_rate=lambda f: f * 2.5e-4, cliprange=lambda f: f * 0.1, verbose=1,
+                 full_tensorboard_log="/tmp/.tensorboard_logs/atari_ppg",
+                tensorboard_log="/tmp/.tensorboard_logs/atari_ppg")
     print("Model created")
     model.learn(total_timesteps=num_timesteps)
 
@@ -39,7 +41,7 @@ def main():
     Runs the test
     """
     parser = atari_arg_parser()
-    parser.add_argument('--policy', help='Policy architecture', choices=['cnn', 'lstm', 'lnlstm', 'mlp'], default='mlp')
+    parser.add_argument('--policy', help='Policy architecture', choices=['cnn', 'lstm', 'lnlstm', 'mlp'], default='cnn')
     args = parser.parse_args()
     logger.configure()
     train(args.env, num_timesteps=args.num_timesteps, seed=args.seed,

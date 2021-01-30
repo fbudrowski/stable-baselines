@@ -57,8 +57,8 @@ class PPGFeedForwardPolicy(ActorCriticPolicy):
 
         with tf.variable_scope("model", reuse=reuse):
             if feature_extraction == "cnn":
-                pi_latent = joint_vf_latent = cnn_extractor(self.processed_obs, **kwargs)
-                vf_latent = cnn_extractor(self.processed_obs, **kwargs)
+                pi_latent = joint_vf_latent = cnn_extractor(self.processed_obs, name="joint_pi_vf", **kwargs)
+                vf_latent = cnn_extractor(self.processed_obs, name="separate_vf", **kwargs)
             else:
                 pi_latent, joint_vf_latent = mlp_extractor(tf.layers.flatten(self.processed_obs), net_arch, act_fun)
                 _, vf_latent = mlp_extractor(tf.layers.flatten(self.processed_obs), [dict(vf=separate_vf_layers, pi=[64])],
@@ -163,9 +163,9 @@ class PPG(ActorCriticRLModel):
     :param n_cpu_tf_sess: (int) The number of threads for TensorFlow operations
         If None, the number of cpu of the current machine will be used.
     """
-    def __init__(self, policy, env, gamma=0.99, n_steps=128, ent_coef=0.01, learning_rate=2.5e-4, vf_coef=0.5,
+    def __init__(self, policy, env, gamma=0.99, n_steps=128, ent_coef=0.01, learning_rate=5e-4, vf_coef=0.5,
                  max_grad_norm=0.5, lam=0.95, nminibatches=4, noptepochs=4, cliprange=0.2, cliprange_vf=None,
-
+                 noptepochs_aux=1, policy_phases=32, auxiliary_phases=6,
                  verbose=0, tensorboard_log=None, _init_setup_model=True, policy_kwargs=None,
                  full_tensorboard_log=False, seed=None, n_cpu_tf_sess=None):
 
@@ -180,8 +180,11 @@ class PPG(ActorCriticRLModel):
         self.lam = lam
         self.nminibatches = nminibatches
         self.noptepochs = noptepochs
+        self.noptepochs_aux = noptepochs_aux
         self.tensorboard_log = tensorboard_log
         self.full_tensorboard_log = full_tensorboard_log
+        self.policy_phases = policy_phases
+        self.auxiliary_phases = auxiliary_phases
 
         self.action_ph = None
         self.advs_ph = None
@@ -318,7 +321,9 @@ class PPG(ActorCriticRLModel):
                     tf.summary.scalar('approximate_kullback-leibler', self.approxkl)
                     tf.summary.scalar('clip_factor', self.clipfrac)
                     tf.summary.scalar('loss', loss)
-                    tf.summary.scalar('loss_aux', loss_aux)
+                    tf.summary.scalar('total_aux_loss', loss_aux)
+                    tf.summary.scalar('aux_loss', self.aux_loss)
+                    tf.summary.scalar('behavioural_cloning', self.beh_cloning_loss)
 
                     with tf.variable_scope('model'):
                         self.params = tf.trainable_variables()
@@ -337,6 +342,7 @@ class PPG(ActorCriticRLModel):
                 self._train_aux = trainer.apply_gradients(grads_aux)
 
                 self.loss_names = ['policy_loss', 'value_loss', 'policy_entropy', 'approxkl', 'clipfrac']
+                self.aux_loss_names = ['aux_loss', 'beh_cloning_loss', 'value_loss']
 
                 with tf.variable_scope("input_info", reuse=False):
                     tf.summary.scalar('discounted_rewards', tf.reduce_mean(self.rewards_ph))
@@ -453,13 +459,27 @@ class PPG(ActorCriticRLModel):
         else:
             update_fac = max(self.n_batch // self.nminibatches // self.noptepochs // self.n_steps, 1)
 
+        if writer is not None:
+            # run loss backprop with summary, but once every 10 runs save the metadata (memory, compute time, ...)
+            if self.full_tensorboard_log and (1 + update) % 10 == 0:
+                run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                run_metadata = tf.RunMetadata()
 
-        aux_loss, beh_cloning_loss, value_loss, _ = self.sess.run(
-            [self.aux_loss, self.beh_cloning_loss, self.vf_loss, self._train_aux], td_map)
+                summary, aux_loss, beh_cloning_loss, value_loss, _ = self.sess.run(
+                    [self.summary, self.aux_loss, self.beh_cloning_loss, self.vf_loss, self._train_aux],
+                    td_map, options=run_options, run_metadata=run_metadata)
+                writer.add_run_metadata(run_metadata, 'step%d' % (update * update_fac))
+            else:
+                summary, aux_loss, beh_cloning_loss, value_loss, _ = self.sess.run(
+                    [self.summary, self.aux_loss, self.beh_cloning_loss, self.vf_loss, self._train_aux], td_map)
+            writer.add_summary(summary, (update * update_fac))
+        else:
+            aux_loss, beh_cloning_loss, value_loss, _ = self.sess.run(
+                [self.aux_loss, self.beh_cloning_loss, self.vf_loss, self._train_aux], td_map)
 
         return aux_loss, beh_cloning_loss, value_loss
 
-    def learn(self, total_timesteps, callback=None, log_interval=1, tb_log_name="PPG",
+    def learn(self, total_timesteps, callback=None, log_interval_policy_phase=8, log_interval_aux_phase=1, tb_log_name="PPG",
               reset_num_timesteps=True):
         # Transform to callable if needed
         self.learning_rate = get_schedule_fn(self.learning_rate)
@@ -476,9 +496,6 @@ class PPG(ActorCriticRLModel):
 
             t_first_start = time.time()
             # n_updates = total_timesteps // self.n_batch
-            self.policy_phases = 32
-            self.auxiliary_phases = 6
-            self.updates_per_phase = 1
 
             n_phases = total_timesteps // (self.n_batch * self.policy_phases)
             print("Total phases", n_phases)
@@ -491,99 +508,99 @@ class PPG(ActorCriticRLModel):
                 rollout_buffer = []
 
                 for policy_phase in range(1, self.policy_phases + 1):
-                    for update in range(1, self.updates_per_phase + 1):
-                        assert self.n_batch % self.nminibatches == 0, ("The number of minibatches (`nminibatches`) "
-                                                                       "is not a factor of the total number of samples "
-                                                                       "collected per rollout (`n_batch`), "
-                                                                       "some samples won't be used."
-                                                                       )
-                        batch_size = self.n_batch // self.nminibatches
-                        t_start = time.time()
-                        cur_update = (phase-1) * (self.policy_phases + self.auxiliary_phases) + policy_phase
-                        all_updates = n_phases * (self.policy_phases + self.auxiliary_phases) - 1.0
-                        frac = 1.0 - cur_update / all_updates
+                    assert self.n_batch % self.nminibatches == 0, ("The number of minibatches (`nminibatches`) "
+                                                                   "is not a factor of the total number of samples "
+                                                                   "collected per rollout (`n_batch`), "
+                                                                   "some samples won't be used."
+                                                                   )
+                    batch_size = self.n_batch // self.nminibatches
+                    t_start = time.time()
+                    cur_update = (phase-1) * (self.policy_phases + self.auxiliary_phases) + policy_phase
+                    all_updates = n_phases * (self.policy_phases + self.auxiliary_phases) - 1.0
+                    frac = 1.0 - cur_update / all_updates
 
-                        lr_now = self.learning_rate(frac)
-                        cliprange_now = self.cliprange(frac)
-                        cliprange_vf_now = cliprange_vf(frac)
+                    lr_now = self.learning_rate(frac)
+                    cliprange_now = self.cliprange(frac)
+                    cliprange_vf_now = cliprange_vf(frac)
 
-                        callback.on_rollout_start()
-                        # true_reward is the reward without discount
-                        rollout = self.runner.run(callback)
-                        # add to rollout buffer
-                        rollout_buffer.append(rollout)
-                        # Unpack
-                        obs, returns, masks, actions, values, values_joint, neglogpacs, states, ep_infos, true_reward = rollout
+                    callback.on_rollout_start()
+                    # true_reward is the reward without discount
+                    rollout = self.runner.run(callback)
+                    # add to rollout buffer
+                    rollout_buffer.append(rollout)
+                    # Unpack
+                    obs, returns, masks, actions, values, values_joint, neglogpacs, states, ep_infos, true_reward = rollout
 
-                        callback.on_rollout_end()
+                    callback.on_rollout_end()
 
-                        # Early stopping due to the callback
-                        if not self.runner.continue_training:
-                            break
+                    # Early stopping due to the callback
+                    if not self.runner.continue_training:
+                        break
 
-                        self.ep_info_buf.extend(ep_infos)
-                        mb_loss_vals = []
-                        if states is None:  # nonrecurrent version
-                            update_fac = max(self.n_batch // self.nminibatches // self.noptepochs, 1)
-                            inds = np.arange(self.n_batch)
-                            for epoch_num in range(self.noptepochs):
-                                np.random.shuffle(inds)
-                                for start in range(0, self.n_batch, batch_size):
-                                    timestep = self.num_timesteps // update_fac + ((epoch_num *
-                                                                                    self.n_batch + start) // batch_size)
-                                    end = start + batch_size
-                                    mbinds = inds[start:end]
-                                    slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
-                                    mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, writer=writer,
-                                                                         update=timestep, cliprange_vf=cliprange_vf_now))
-                        # else:  # recurrent version
-                        #     update_fac = max(self.n_batch // self.nminibatches // self.noptepochs // self.n_steps, 1)
-                        #     assert self.n_envs % self.nminibatches == 0
-                        #     env_indices = np.arange(self.n_envs)
-                        #     flat_indices = np.arange(self.n_envs * self.n_steps).reshape(self.n_envs, self.n_steps)
-                        #     envs_per_batch = batch_size // self.n_steps
-                        #     for epoch_num in range(self.noptepochs):
-                        #         np.random.shuffle(env_indices)
-                        #         for start in range(0, self.n_envs, envs_per_batch):
-                        #             timestep = self.num_timesteps // update_fac + ((epoch_num *
-                        #                                                             self.n_envs + start) // envs_per_batch)
-                        #             end = start + envs_per_batch
-                        #             mb_env_inds = env_indices[start:end]
-                        #             mb_flat_inds = flat_indices[mb_env_inds].ravel()
-                        #             slices = (arr[mb_flat_inds] for arr in (obs, returns, masks, actions, values, neglogpacs))
-                        #             mb_states = states[mb_env_inds]
-                        #             mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, update=timestep,
-                        #                                                  writer=writer, states=mb_states,
-                        #                                                  cliprange_vf=cliprange_vf_now))
+                    self.ep_info_buf.extend(ep_infos)
+                    mb_loss_vals = []
+                    if states is None:  # nonrecurrent version
+                        update_fac = max(self.n_batch // self.nminibatches // self.noptepochs, 1)
+                        inds = np.arange(self.n_batch)
+                        for epoch_num in range(self.noptepochs):
+                            np.random.shuffle(inds)
+                            for start in range(0, self.n_batch, batch_size):
+                                timestep = self.num_timesteps // update_fac + ((epoch_num *
+                                                                                self.n_batch + start) // batch_size)
+                                end = start + batch_size
+                                mbinds = inds[start:end]
+                                slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
+                                mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, writer=writer,
+                                                                     update=timestep, cliprange_vf=cliprange_vf_now))
+                    # else:  # recurrent version
+                    #     update_fac = max(self.n_batch // self.nminibatches // self.noptepochs // self.n_steps, 1)
+                    #     assert self.n_envs % self.nminibatches == 0
+                    #     env_indices = np.arange(self.n_envs)
+                    #     flat_indices = np.arange(self.n_envs * self.n_steps).reshape(self.n_envs, self.n_steps)
+                    #     envs_per_batch = batch_size // self.n_steps
+                    #     for epoch_num in range(self.noptepochs):
+                    #         np.random.shuffle(env_indices)
+                    #         for start in range(0, self.n_envs, envs_per_batch):
+                    #             timestep = self.num_timesteps // update_fac + ((epoch_num *
+                    #                                                             self.n_envs + start) // envs_per_batch)
+                    #             end = start + envs_per_batch
+                    #             mb_env_inds = env_indices[start:end]
+                    #             mb_flat_inds = flat_indices[mb_env_inds].ravel()
+                    #             slices = (arr[mb_flat_inds] for arr in (obs, returns, masks, actions, values, neglogpacs))
+                    #             mb_states = states[mb_env_inds]
+                    #             mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, update=timestep,
+                    #                                                  writer=writer, states=mb_states,
+                    #                                                  cliprange_vf=cliprange_vf_now))
 
-                        loss_vals = np.mean(mb_loss_vals, axis=0)
-                        t_now = time.time()
-                        fps = int(self.n_batch / (t_now - t_start))
+                    loss_vals = np.mean(mb_loss_vals, axis=0)
+                    t_now = time.time()
+                    fps = int(self.n_batch / (t_now - t_start))
 
-                        if writer is not None:
-                            total_episode_reward_logger(self.episode_reward,
-                                                        true_reward.reshape((self.n_envs, self.n_steps)),
-                                                        masks.reshape((self.n_envs, self.n_steps)),
-                                                        writer, self.num_timesteps)
+                    if writer is not None:
+                        total_episode_reward_logger(self.episode_reward,
+                                                    true_reward.reshape((self.n_envs, self.n_steps)),
+                                                    masks.reshape((self.n_envs, self.n_steps)),
+                                                    writer, self.num_timesteps)
 
-                        if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
-                            explained_var = explained_variance(values, returns)
-                            logger.logkv("serial_timesteps", (self.policy_phases * phase + policy_phase) * self.n_steps)
-                            logger.logkv("n_updates", (self.policy_phases * phase + policy_phase))
-                            logger.logkv("total_timesteps", self.num_timesteps)
-                            logger.logkv("fps", fps)
-                            logger.logkv("explained_variance", float(explained_var))
-                            if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
-                                logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
-                                logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
-                            logger.logkv('time_elapsed', t_start - t_first_start)
-                            for (loss_val, loss_name) in zip(loss_vals, self.loss_names):
-                                logger.logkv(loss_name, loss_val)
-                            logger.dumpkvs()
+                    if self.verbose >= 1 and ((policy_phase - 1) % log_interval_policy_phase == 0 or policy_phase == self.policy_phases):
+                        explained_var = explained_variance(values, returns)
+                        logger.logkv("current_phase", phase)
+                        logger.logkv("current_subsequent_pol", policy_phase)
+                        logger.logkv("serial_timesteps", (self.policy_phases * (phase-1) + policy_phase) * self.n_steps)
+                        logger.logkv("total_policy_phases", (self.policy_phases * (phase-1) + policy_phase))
+                        logger.logkv("total_timesteps", self.num_timesteps)
+                        logger.logkv("fps", fps)
+                        logger.logkv("explained_variance", float(explained_var))
+                        if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
+                            logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
+                            logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
+                        logger.logkv('time_elapsed', t_start - t_first_start)
+                        for (loss_val, loss_name) in zip(loss_vals, self.loss_names):
+                            logger.logkv(loss_name, loss_val)
+                        logger.dumpkvs()
 
-                print("B0", type(rollout_buffer[0]), len(rollout_buffer[0]))
-                print("Rollout 0 obs", rollout_buffer[0][0].shape)
 
+                # Joining rollouts from policy phases
                 obs = np.concatenate([rollout[0] for rollout in rollout_buffer], axis=0)
                 returns = np.concatenate([rollout[1] for rollout in rollout_buffer], axis=0)
                 masks = np.concatenate([rollout[2] for rollout in rollout_buffer], axis=0)
@@ -621,7 +638,7 @@ class PPG(ActorCriticRLModel):
                     if states is None:  # nonrecurrent version
                         update_fac = max((self.n_batch * self.policy_phases) // self.nminibatches // self.noptepochs, 1)
                         inds = np.arange(self.n_batch * self.policy_phases)
-                        for epoch_num in range(self.noptepochs):
+                        for epoch_num in range(self.noptepochs_aux):
                             np.random.shuffle(inds)
                             for start in range(0, self.n_batch * self.policy_phases, batch_size):
                                 timestep = (self.policy_phases * self.num_timesteps) // update_fac + ((epoch_num *
@@ -631,12 +648,10 @@ class PPG(ActorCriticRLModel):
                                 # print("Start", start, "end", end, "mbinds", type(mbinds), len(mbinds))
                                 slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, old_neglogpacs))
                                 # print("LR", lr_now, "Cliprange", cliprange_now, "timestep", timestep)
-                                aux_loss, beh_cloning_loss, value_loss = self._auxiliary_step(
-                                    lr_now, cliprange_now, *slices, writer=writer, update=timestep,
-                                    cliprange_vf=cliprange_vf_now)
-                                # print("Aux loss", aux_loss, "BC loss", beh_cloning_loss, "val loss", value_loss)
-                                # mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, writer=writer,
-                                #                                      update=timestep, cliprange_vf=cliprange_vf_now))
+                                mb_loss_vals.append(self._auxiliary_step(
+                                    lr_now, cliprange_now, *slices, writer=writer,
+                                    update=timestep + (aux_phase / (self.auxiliary_phases + 1)),
+                                    cliprange_vf=cliprange_vf_now))
 
                     # else:  # recurrent version
                     #     update_fac = max(self.n_batch // self.nminibatches // self.noptepochs // self.n_steps, 1)
@@ -660,8 +675,10 @@ class PPG(ActorCriticRLModel):
                     #                                                  cliprange_vf=cliprange_vf_now))
 
                     # loss_vals = np.mean(mb_loss_vals, axis=0)
+
+                    loss_vals = np.mean(mb_loss_vals, axis=0)
                     t_now = time.time()
-                    fps = int(self.n_batch / (t_now - t_start))
+                    fps = int(self.n_batch * self.policy_phases / (t_now - t_start))
 
                     # if writer is not None:
                     #     total_episode_reward_logger(self.episode_reward,
@@ -669,20 +686,25 @@ class PPG(ActorCriticRLModel):
                     #                                 masks.reshape((self.n_envs, self.n_steps)),
                     #                                 writer, self.num_timesteps)
 
-                    # if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
-                    #     explained_var = explained_variance(values, returns)
-                    #     logger.logkv("serial_timesteps", update * self.n_steps)
-                    #     logger.logkv("n_updates", update)
-                    #     logger.logkv("total_timesteps", self.num_timesteps)
-                    #     logger.logkv("fps", fps)
-                    #     logger.logkv("explained_variance", float(explained_var))
-                    #     if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
-                    #         logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
-                    #         logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
-                    #     logger.logkv('time_elapsed', t_start - t_first_start)
-                    #     for (loss_val, loss_name) in zip(loss_vals, self.loss_names):
-                    #         logger.logkv(loss_name, loss_val)
-                    #     logger.dumpkvs()
+                    if self.verbose >= 1 and ((aux_phase - 1) % log_interval_aux_phase == 0 or aux_phase == self.auxiliary_phases):
+                        # explained_var = explained_variance(values, returns)
+
+                        logger.logkv("current_phase", phase)
+                        logger.logkv("current_subsequent_aux", aux_phase)
+                        logger.logkv("serial_timesteps", self.policy_phases * phase * self.n_steps)
+                        # logger.logkv("total_policy_")
+                        # logger.logkv("serial_timesteps_aux", update * self.n_steps)
+                        # logger.logkv("n_updates", update)
+                        logger.logkv("total_timesteps_aux", self.num_timesteps)
+                        logger.logkv("fps_aux", fps)
+                        # logger.logkv("explained_variance_aux", float(explained_var))
+                        # if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
+                        #     logger.logkv('ep_reward_mean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
+                        #     logger.logkv('ep_len_mean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
+                        logger.logkv('time_elapsed_aux', t_start - t_first_start)
+                        for (loss_val, loss_name) in zip(loss_vals, self.aux_loss_names):
+                            logger.logkv(loss_name, loss_val)
+                        logger.dumpkvs()
 
 
             callback.on_training_end()
