@@ -446,14 +446,15 @@ class PPG(ActorCriticRLModel):
         return policy_loss, value_loss, policy_entropy, approxkl, clipfrac
 
     def _auxiliary_step(self, learning_rate, cliprange, obs, returns, masks, actions, values, neglogpacs, update,
-                    writer, states=None, cliprange_vf=None):
+                    writer, states=None, old_stats_rew=np.array([]), old_stats_len=np.array([]), cliprange_vf=None):
 
         advs = returns - values
         advs = (advs - advs.mean()) / (advs.std() + 1e-8)
         td_map = {self.train_model.obs_ph: obs, self.action_ph: actions,
                   self.advs_ph: advs, self.rewards_ph: returns,
                   self.learning_rate_ph: learning_rate, self.clip_range_ph: cliprange,
-                  self.old_neglog_pac_ph: neglogpacs, self.old_vpred_ph: values}
+                  self.old_neglog_pac_ph: neglogpacs, self.old_vpred_ph: values,
+                  self.stats_eprew_ph: old_stats_rew, self.stats_eplen_ph: old_stats_len}
 
         if states is not None:
             td_map[self.train_model.states_ph] = states
@@ -514,6 +515,8 @@ class PPG(ActorCriticRLModel):
             for phase in range(1, n_phases + 1):
 
                 rollout_buffer = []
+                old_stats_len = None
+                old_stats_rew = None
 
                 for policy_phase in range(1, self.policy_phases + 1):
                     assert self.n_batch % self.nminibatches == 0, ("The number of minibatches (`nminibatches`) "
@@ -547,8 +550,8 @@ class PPG(ActorCriticRLModel):
 
                     self.ep_info_buf.extend(ep_infos)
 
-                    mean_rewards = safe_mean([ep_info['r'] for ep_info in self.ep_info_buf])
-                    mean_lengths = safe_mean([ep_info['l'] for ep_info in self.ep_info_buf])
+                    mean_rewards = old_stats_rew = safe_mean([ep_info['r'] for ep_info in self.ep_info_buf])
+                    mean_lengths = old_stats_len = safe_mean([ep_info['l'] for ep_info in self.ep_info_buf])
 
                     mb_loss_vals = []
                     if states is None:  # nonrecurrent version
@@ -666,6 +669,7 @@ class PPG(ActorCriticRLModel):
                                 mb_loss_vals.append(self._auxiliary_step(
                                     lr_now, cliprange_now, *slices, writer=writer,
                                     update=timestep + (aux_phase / (self.auxiliary_phases + 1)),
+                                    old_stats_len=old_stats_len, old_stats_rew=old_stats_rew,
                                     cliprange_vf=cliprange_vf_now))
 
                     # else:  # recurrent version
@@ -746,6 +750,7 @@ class PPG(ActorCriticRLModel):
             "n_cpu_tf_sess": self.n_cpu_tf_sess,
             "seed": self.seed,
             "_vectorize_action": self._vectorize_action,
+            ""
             "policy_kwargs": self.policy_kwargs
         }
 
