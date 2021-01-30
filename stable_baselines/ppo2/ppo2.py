@@ -88,6 +88,8 @@ class PPO2(ActorCriticRLModel):
         self.value = None
         self.n_batch = None
         self.summary = None
+        self.stats_eprew_ph = None
+        self.stats_eplen_ph = None
 
         super().__init__(policy=policy, env=env, verbose=verbose, requires_vec_env=True,
                          _init_setup_model=_init_setup_model, policy_kwargs=policy_kwargs,
@@ -143,6 +145,8 @@ class PPO2(ActorCriticRLModel):
                     self.old_vpred_ph = tf.placeholder(tf.float32, [None], name="old_vpred_ph")
                     self.learning_rate_ph = tf.placeholder(tf.float32, [], name="learning_rate_ph")
                     self.clip_range_ph = tf.placeholder(tf.float32, [], name="clip_range_ph")
+                    self.stats_eprew_ph = tf.placeholder(tf.float32, [], name="stats_eprew_ph")
+                    self.stats_eplen_ph = tf.placeholder(tf.float32, [], name="stats_eplen_ph")
 
                     neglogpac = train_model.proba_distribution.neglogp(self.action_ph)
                     self.entropy = tf.reduce_mean(train_model.proba_distribution.entropy())
@@ -219,6 +223,9 @@ class PPO2(ActorCriticRLModel):
                     tf.summary.scalar('old_neglog_action_probability', tf.reduce_mean(self.old_neglog_pac_ph))
                     tf.summary.scalar('old_value_pred', tf.reduce_mean(self.old_vpred_ph))
 
+                    tf.summary.scalar('eprewmean', tf.reduce_mean(self.stats_eprew_ph))
+                    tf.summary.scalar('eplenmean', tf.reduce_mean(self.stats_eplen_ph))
+
                     if self.full_tensorboard_log:
                         tf.summary.histogram('discounted_rewards', self.rewards_ph)
                         tf.summary.histogram('learning_rate', self.learning_rate_ph)
@@ -242,7 +249,7 @@ class PPO2(ActorCriticRLModel):
                 self.summary = tf.summary.merge_all()
 
     def _train_step(self, learning_rate, cliprange, obs, returns, masks, actions, values, neglogpacs, update,
-                    writer, states=None, cliprange_vf=None):
+                    writer, states=None, stats_rew=np.array([0.0]), stats_len=np.array([0.0]), cliprange_vf=None):
         """
         Training of PPO2 Algorithm
 
@@ -266,7 +273,8 @@ class PPO2(ActorCriticRLModel):
         td_map = {self.train_model.obs_ph: obs, self.action_ph: actions,
                   self.advs_ph: advs, self.rewards_ph: returns,
                   self.learning_rate_ph: learning_rate, self.clip_range_ph: cliprange,
-                  self.old_neglog_pac_ph: neglogpacs, self.old_vpred_ph: values}
+                  self.old_neglog_pac_ph: neglogpacs, self.old_vpred_ph: values,
+                  self.stats_eprew_ph: stats_rew, self.stats_eplen_ph: stats_len}
         if states is not None:
             td_map[self.train_model.states_ph] = states
             td_map[self.train_model.dones_ph] = masks
@@ -344,6 +352,10 @@ class PPO2(ActorCriticRLModel):
                     break
 
                 self.ep_info_buf.extend(ep_infos)
+
+                mean_rewards = safe_mean([ep_info['r'] for ep_info in self.ep_info_buf])
+                mean_lengths = safe_mean([ep_info['l'] for ep_info in self.ep_info_buf])
+
                 mb_loss_vals = []
                 if states is None:  # nonrecurrent version
                     update_fac = max(self.n_batch // self.nminibatches // self.noptepochs, 1)
@@ -357,7 +369,8 @@ class PPO2(ActorCriticRLModel):
                             mbinds = inds[start:end]
                             slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
                             mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, writer=writer,
-                                                                 update=timestep, cliprange_vf=cliprange_vf_now))
+                                                                 update=timestep, stats_rew=mean_rewards,
+                                                                 stats_len=mean_lengths, cliprange_vf=cliprange_vf_now))
                 else:  # recurrent version
                     update_fac = max(self.n_batch // self.nminibatches // self.noptepochs // self.n_steps, 1)
                     assert self.n_envs % self.nminibatches == 0
@@ -388,33 +401,8 @@ class PPO2(ActorCriticRLModel):
                                                 masks.reshape((self.n_envs, self.n_steps)),
                                                 writer, self.num_timesteps)
 
-                    g = tf.compat.v1.Graph()
-                    with g.as_default():
-                        step = tf.Variable(self.num_timesteps, dtype=tf.int64)
-                        step_update = step.assign(self.num_timesteps)
-                        # writer = tf.summary.create_file_writer("/tmp/mylogs/session")
-                        with writer.as_default():
-                            tf.summary.scalar('eprewmean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]),
-                                              self.num_timesteps)
-                            tf.summary.scalar('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]),
-                                              self.num_timesteps)
-                        summary_ops = tf.summary.merge_all()
-                        writer_flush = writer.flush()
 
-                    with tf.compat.v1.Session(graph=g) as sess:
-                        sess.run([writer.init(), step.initializer])
-                        sess.run(summary_ops)
-                        sess.run(step_update)
-                        sess.run(writer_flush)
 
-                    # self.graph = tf.Graph()
-                    # with self.graph.as_default():
-                    #     with writer.as_default():
-                    #         tf.summary.scalar('eprewmean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]),
-                    #                           self.num_timesteps)
-                    #         tf.summary.scalar('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]),
-                    #                           self.num_timesteps)
-                    #     writer.flush()
 
                 if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
                     explained_var = explained_variance(values, returns)
