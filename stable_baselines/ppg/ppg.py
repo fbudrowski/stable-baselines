@@ -354,6 +354,7 @@ class PPG(ActorCriticRLModel):
 
                     tf.summary.scalar('old_neglog_action_probability', tf.reduce_mean(self.old_neglog_pac_ph))
                     tf.summary.scalar('old_value_pred', tf.reduce_mean(self.old_vpred_ph))
+                    tf.summary.scalar('eprewmean', tf.reduce_mean(self.rewards_ph))
 
                     if self.full_tensorboard_log:
                         tf.summary.histogram('discounted_rewards', self.rewards_ph)
@@ -581,6 +582,11 @@ class PPG(ActorCriticRLModel):
                                                     true_reward.reshape((self.n_envs, self.n_steps)),
                                                     masks.reshape((self.n_envs, self.n_steps)),
                                                     writer, self.num_timesteps)
+
+                    writer.add_summary({
+                                           'eprewmean': safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]),
+                                           'eplenmean': safe_mean([ep_info['l'] for ep_info in self.ep_info_buf])
+                                       }, self.num_timesteps)
 
                     if self.verbose >= 1 and ((policy_phase - 1) % log_interval_policy_phase == 0 or policy_phase == self.policy_phases):
                         explained_var = explained_variance(values, returns)
