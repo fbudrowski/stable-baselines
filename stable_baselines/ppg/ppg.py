@@ -582,10 +582,10 @@ class PPG(ActorCriticRLModel):
                                                     true_reward.reshape((self.n_envs, self.n_steps)),
                                                     masks.reshape((self.n_envs, self.n_steps)),
                                                     writer, self.num_timesteps)
-                        writer.add_summary({
-                                               'eprewmean': safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]),
-                                               'eplenmean': safe_mean([ep_info['l'] for ep_info in self.ep_info_buf])
-                                           }, self.num_timesteps)
+                        with writer.writer.as_default():
+                            tf.summary.scalar('eprewmean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]), self.num_timesteps)
+                            tf.summary.scalar('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]), self.num_timesteps)
+                        writer.flush()
 
                     if self.verbose >= 1 and ((policy_phase - 1) % log_interval_policy_phase == 0 or policy_phase == self.policy_phases):
                         explained_var = explained_variance(values, returns)
