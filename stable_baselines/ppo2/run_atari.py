@@ -5,7 +5,7 @@ from stable_baselines.common.policies import CnnPolicy, CnnLstmPolicy, CnnLnLstm
 
 
 def train(env_id, num_timesteps, seed, policy,
-          n_envs=8, nminibatches=4, n_steps=128):
+          n_envs=8, nminibatches=4, n_steps=128, logdir=None):
     """
     Train PPO2 model for atari environment, for testing purposes
 
@@ -24,7 +24,8 @@ def train(env_id, num_timesteps, seed, policy,
     policy = {'cnn': CnnPolicy, 'lstm': CnnLstmPolicy, 'lnlstm': CnnLnLstmPolicy, 'mlp': MlpPolicy}[policy]
     model = PPO2(policy=policy, env=env, n_steps=n_steps, nminibatches=nminibatches,
                  lam=0.95, gamma=0.99, noptepochs=4, ent_coef=.01,
-                 learning_rate=lambda f: f * 2.5e-4, cliprange=lambda f: f * 0.1, verbose=1)
+                 learning_rate=lambda f: f * 2.5e-4, cliprange=lambda f: f * 0.1, verbose=1,
+                 full_tensorboard_log=logdir, tensorboard_log=logdir)
     model.learn(total_timesteps=num_timesteps)
 
     env.close()
@@ -38,10 +39,11 @@ def main():
     """
     parser = atari_arg_parser()
     parser.add_argument('--policy', help='Policy architecture', choices=['cnn', 'lstm', 'lnlstm', 'mlp'], default='cnn')
+    parser.add_argument('--logdir', help='Directory to save Tensorboard logs', default=None)
     args = parser.parse_args()
     logger.configure()
     train(args.env, num_timesteps=args.num_timesteps, seed=args.seed,
-          policy=args.policy)
+          policy=args.policy, logdir=args.logdir)
 
 
 if __name__ == '__main__':

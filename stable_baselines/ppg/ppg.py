@@ -267,7 +267,7 @@ class PPG(ActorCriticRLModel):
                     self.entropy = tf.reduce_mean(train_model.proba_distribution.entropy())
 
                     vpred = train_model.value_flat
-                    print("VPRED 0", vpred)
+                    # print("VPRED 0", vpred)
 
                     # Value function clipping: not present in the original PPO
                     if self.cliprange_vf is None:
@@ -308,7 +308,7 @@ class PPG(ActorCriticRLModel):
                     loss = self.pg_loss - self.entropy * self.ent_coef + self.vf_loss * self.vf_coef
 
                     vpred_joint = train_model.joined_value_flat
-                    print("VPRED", vpred, "VPRED JOINT", vpred_joint)
+                    # print("VPRED", vpred, "VPRED JOINT", vpred_joint)
 
                     self.aux_loss = .5 * tf.reduce_mean(tf.square(vpred_joint - self.rewards_ph))
                     self.beh_cloning_loss = .5 * tf.reduce_mean(tf.square(neglogpac - self.old_neglog_pac_ph))
@@ -606,11 +606,11 @@ class PPG(ActorCriticRLModel):
                 masks = np.concatenate([rollout[2] for rollout in rollout_buffer], axis=0)
                 actions = np.concatenate([rollout[3] for rollout in rollout_buffer], axis=0)
                 values = np.concatenate([rollout[4] for rollout in rollout_buffer], axis=0)
-                print("Obs", type(obs), obs.shape, "ob0", rollout[0][0].shape)
-                print("Returns", returns.shape)
-                print("Valuese", values.shape, "dones", masks.shape)
+                # print("Obs", type(obs), obs.shape, "ob0", rollout[0][0].shape)
+                # print("Returns", returns.shape)
+                # print("Valuese", values.shape, "dones", masks.shape)
                 old_actions, _, _, old_neglogpacs, _ = self.train_model.step(obs, None, masks)
-                print("old_acitions", type(old_actions), old_actions.shape, "oldneglogpacs", type(old_neglogpacs), old_neglogpacs.shape)
+                # print("old_acitions", type(old_actions), old_actions.shape, "oldneglogpacs", type(old_neglogpacs), old_neglogpacs.shape)
 
                 for aux_phase in range(1, self.auxiliary_phases + 1):
 
