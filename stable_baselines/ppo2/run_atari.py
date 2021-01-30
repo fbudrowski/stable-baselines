@@ -24,7 +24,7 @@ def train(env_id, num_timesteps, seed, policy, load_addr=None, save_addr="ppo2_m
     env = VecFrameStack(make_atari_env(env_id, n_envs, seed), 4)
     policy = {'cnn': CnnPolicy, 'lstm': CnnLstmPolicy, 'lnlstm': CnnLnLstmPolicy, 'mlp': MlpPolicy}[policy]
     if load_addr:
-        model = PPO2.load(load_addr)
+        model = PPO2.load(load_addr, env=env)
     else:
         model = PPO2(policy=policy, env=env, n_steps=n_steps, nminibatches=nminibatches,
                  lam=0.95, gamma=0.99, noptepochs=4, ent_coef=.01,
