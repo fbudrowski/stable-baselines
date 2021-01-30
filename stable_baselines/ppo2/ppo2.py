@@ -388,12 +388,33 @@ class PPO2(ActorCriticRLModel):
                                                 masks.reshape((self.n_envs, self.n_steps)),
                                                 writer, self.num_timesteps)
 
-                    with writer.as_default():
-                        tf.summary.scalar('eprewmean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]),
-                                          self.num_timesteps)
-                        tf.summary.scalar('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]),
-                                          self.num_timesteps)
-                    writer.flush()
+                    g = tf.compat.v1.Graph()
+                    with g.as_default():
+                        step = tf.Variable(self.num_timesteps, dtype=tf.int64)
+                        step_update = step.assign(self.num_timesteps)
+                        # writer = tf.summary.create_file_writer("/tmp/mylogs/session")
+                        with writer.as_default():
+                            tf.summary.scalar('eprewmean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]),
+                                              self.num_timesteps)
+                            tf.summary.scalar('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]),
+                                              self.num_timesteps)
+                        summary_ops = tf.summary.merge_all()
+                        writer_flush = writer.flush()
+
+                    with tf.compat.v1.Session(graph=g) as sess:
+                        sess.run([writer.init(), step.initializer])
+                        sess.run(summary_ops)
+                        sess.run(step_update)
+                        sess.run(writer_flush)
+
+                    # self.graph = tf.Graph()
+                    # with self.graph.as_default():
+                    #     with writer.as_default():
+                    #         tf.summary.scalar('eprewmean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]),
+                    #                           self.num_timesteps)
+                    #         tf.summary.scalar('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]),
+                    #                           self.num_timesteps)
+                    #     writer.flush()
 
                 if self.verbose >= 1 and (update % log_interval == 0 or update == 1):
                     explained_var = explained_variance(values, returns)
