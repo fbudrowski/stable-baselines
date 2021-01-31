@@ -331,9 +331,9 @@ class PPG(ActorCriticRLModel):
 
                     with tf.variable_scope('model'):
                         self.params = tf.trainable_variables()
-                        if self.full_tensorboard_log:
-                            for var in self.params:
-                                tf.summary.histogram(var.name, var)
+                        # if self.full_tensorboard_log:
+                        #     for var in self.params:
+                        #         tf.summary.histogram(var.name, var)
                     grads = tf.gradients(loss, self.params)
                     grads_aux = tf.gradients(loss_aux, self.params)
                     if self.max_grad_norm is not None:
@@ -362,17 +362,17 @@ class PPG(ActorCriticRLModel):
                     tf.summary.scalar('eprewmean', tf.reduce_mean(self.stats_eprew_ph))
                     tf.summary.scalar('eplenmean', tf.reduce_mean(self.stats_eplen_ph))
 
-                    if self.full_tensorboard_log:
-                        tf.summary.histogram('discounted_rewards', self.rewards_ph)
-                        tf.summary.histogram('learning_rate', self.learning_rate_ph)
-                        tf.summary.histogram('advantage', self.advs_ph)
-                        tf.summary.histogram('clip_range', self.clip_range_ph)
-                        tf.summary.histogram('old_neglog_action_probability', self.old_neglog_pac_ph)
-                        tf.summary.histogram('old_value_pred', self.old_vpred_ph)
-                        if tf_util.is_image(self.observation_space):
-                            tf.summary.image('observation', train_model.obs_ph)
-                        else:
-                            tf.summary.histogram('observation', train_model.obs_ph)
+                    # if self.full_tensorboard_log:
+                        # tf.summary.histogram('discounted_rewards', self.rewards_ph)
+                        # tf.summary.histogram('learning_rate', self.learning_rate_ph)
+                        # tf.summary.histogram('advantage', self.advs_ph)
+                        # tf.summary.histogram('clip_range', self.clip_range_ph)
+                        # tf.summary.histogram('old_neglog_action_probability', self.old_neglog_pac_ph)
+                        # tf.summary.histogram('old_value_pred', self.old_vpred_ph)
+                        # if tf_util.is_image(self.observation_space):
+                        #     tf.summary.image('observation', train_model.obs_ph)
+                        # else:
+                        #     tf.summary.histogram('observation', train_model.obs_ph)
 
                 self.train_model = train_model
                 self.act_model = act_model
