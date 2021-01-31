@@ -61,7 +61,7 @@ def main():
     parser.add_argument('--timesteps_per_save', help='', type=int, default=None)
     args = parser.parse_args()
     logger.configure()
-    train(args.env, num_timesteps=args.num_timesteps, seed=args.seed, load_addr=args.load_addr,
+    train(args.env, num_timesteps=args.num_timesteps, seed=args.seed, load_addr=args.load_addr, full_logs=True,
           save_addr=args.save_addr, policy=args.policy, logdir=args.logdir, timesteps_per_save=args.timesteps_per_save)
 
 
