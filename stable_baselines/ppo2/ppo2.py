@@ -337,6 +337,8 @@ class PPO2(ActorCriticRLModel):
                 frac = 1.0 - (update - 1.0) / n_updates
                 if target_timesteps:
                     frac = 1.0 - (self.num_timesteps) / (target_timesteps)
+
+                frac = max(frac, 0.4)
                 lr_now = self.learning_rate(frac)
                 cliprange_now = self.cliprange(frac)
                 cliprange_vf_now = cliprange_vf(frac)

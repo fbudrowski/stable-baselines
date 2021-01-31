@@ -535,7 +535,7 @@ class PPG(ActorCriticRLModel):
                     if target_timesteps:
                         cur_update += (self.policy_phases + self.auxiliary_phases) * (self.num_timesteps // (self.n_batch * self.policy_phases))
                         all_updates = (self.policy_phases + self.auxiliary_phases) * (target_timesteps // (self.n_batch * self.policy_phases))
-                    frac = 1.0 - cur_update / all_updates
+                    frac = max(1.0 - cur_update / all_updates, 0.4)
 
                     lr_now = self.learning_rate(frac)
                     cliprange_now = self.cliprange(frac)
