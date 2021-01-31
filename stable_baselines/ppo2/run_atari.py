@@ -29,7 +29,7 @@ def train(env_id, num_timesteps, seed, policy, load_addr=None, save_addr="ppo2_m
         model = PPO2(policy=policy, env=env, n_steps=n_steps, nminibatches=nminibatches,
                  lam=0.95, gamma=0.99, noptepochs=4, ent_coef=.01,
                  learning_rate=lambda f: f * 2.5e-4, cliprange=lambda f: f * 0.1, verbose=1,
-                 full_tensorboard_log=logdir if full_logs else None, tensorboard_log=logdir)
+                 full_tensorboard_log=logdir if full_logs else False, tensorboard_log=logdir)
 
     timesteps_per_save = timesteps_per_save or (num_timesteps // 2)
     total_rounds = num_timesteps // timesteps_per_save
