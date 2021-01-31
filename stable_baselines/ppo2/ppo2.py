@@ -308,7 +308,7 @@ class PPO2(ActorCriticRLModel):
         return policy_loss, value_loss, policy_entropy, approxkl, clipfrac
 
     def learn(self, total_timesteps, callback=None, log_interval=1, tb_log_name="PPO2",
-              reset_num_timesteps=True):
+              reset_num_timesteps=True, target_timesteps=None):
         # Transform to callable if needed
         self.learning_rate = get_schedule_fn(self.learning_rate)
         self.cliprange = get_schedule_fn(self.cliprange)
@@ -335,6 +335,8 @@ class PPO2(ActorCriticRLModel):
                 batch_size = self.n_batch // self.nminibatches
                 t_start = time.time()
                 frac = 1.0 - (update - 1.0) / n_updates
+                if target_timesteps:
+                    frac = 1.0 - (self.num_timesteps) / (target_timesteps)
                 lr_now = self.learning_rate(frac)
                 cliprange_now = self.cliprange(frac)
                 cliprange_vf_now = cliprange_vf(frac)
