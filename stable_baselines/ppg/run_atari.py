@@ -5,7 +5,7 @@ from stable_baselines.ppg.ppg import PPGCnnPolicy, PPGMlpPolicy
 from datetime import datetime, timezone
 from pathlib import Path
 
-def train(env_id, num_timesteps, seed, policy, load_addr=None, save_addr="ppo2_model", n_envs=8, nminibatches=4,
+def train(env_id, num_timesteps, seed, policy, load_addr=None, save_addr="ppg_breakout", n_envs=8, nminibatches=4,
           n_steps=128, logdir="/tmp/.tensorboard_logs/atari_ppg", full_logs=False, timesteps_per_save=None):
     """
     Train PPG model for atari environment, for testing purposes
