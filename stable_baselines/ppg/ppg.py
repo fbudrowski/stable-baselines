@@ -489,7 +489,7 @@ class PPG(ActorCriticRLModel):
         return aux_loss, beh_cloning_loss, value_loss
 
     def learn(self, total_timesteps, callback=None, log_interval_policy_phase=8, log_interval_aux_phase=1, tb_log_name="PPG",
-              reset_num_timesteps=True):
+              reset_num_timesteps=True, target_timesteps=None):
         # Transform to callable if needed
         self.learning_rate = get_schedule_fn(self.learning_rate)
         self.cliprange = get_schedule_fn(self.cliprange)
@@ -506,7 +506,11 @@ class PPG(ActorCriticRLModel):
             t_first_start = time.time()
             # n_updates = total_timesteps // self.n_batch
 
-            n_phases = total_timesteps // (self.n_batch * self.policy_phases)
+            assert total_timesteps > 0 and total_timesteps % (self.n_batch * self.policy_phases) == 0, ("Total timesteps"
+                                                                                                        "not enough for"
+                                                                                                        "the full phases"
+                                                                                                        )
+            n_phases = max(1, total_timesteps // (self.n_batch * self.policy_phases))
             print("Total phases", n_phases)
 
 
@@ -529,6 +533,9 @@ class PPG(ActorCriticRLModel):
                     cur_update = (phase-1) * (self.policy_phases + self.auxiliary_phases) + policy_phase
                     all_updates = n_phases * (self.policy_phases + self.auxiliary_phases) - 1.0
                     frac = 1.0 - cur_update / all_updates
+                    if target_timesteps:
+                        cur_update += (self.policy_phases + self.auxiliary_phases) * (self.num_timesteps // (self.n_batch * self.policy_phases))
+                        all_updates = (target_timesteps // (self.n_batch * self.policy_phases))
 
                     lr_now = self.learning_rate(frac)
                     cliprange_now = self.cliprange(frac)
