@@ -5,8 +5,8 @@ from stable_baselines.ppg.ppg import PPGCnnPolicy, PPGMlpPolicy
 from datetime import datetime, timezone
 from pathlib import Path
 
-def train(env_id, num_timesteps, seed, policy, load_addr=None, save_addr="ppo2_model",
-          n_envs=8, nminibatches=4, n_steps=128, logdir="/tmp/.tensorboard_logs/atari_ppg", timesteps_per_save=None):
+def train(env_id, num_timesteps, seed, policy, load_addr=None, save_addr="ppo2_model", n_envs=8, nminibatches=4,
+          n_steps=128, logdir="/tmp/.tensorboard_logs/atari_ppg", full_logs=False, timesteps_per_save=None):
     """
     Train PPG model for atari environment, for testing purposes
 
@@ -29,7 +29,7 @@ def train(env_id, num_timesteps, seed, policy, load_addr=None, save_addr="ppo2_m
         model = PPG(policy=policy, env=env, n_steps=n_steps, nminibatches=nminibatches,
                      lam=0.95, gamma=0.99, noptepochs=4, ent_coef=.01,
                      learning_rate=lambda f: f * 2.5e-4, cliprange=lambda f: f * 0.1, verbose=1,
-                     full_tensorboard_log=logdir, tensorboard_log=logdir)
+                     full_tensorboard_log=logdir if full_logs else None, tensorboard_log=logdir)
 
     timesteps_per_save = timesteps_per_save or (num_timesteps // 2)
     total_rounds = num_timesteps // timesteps_per_save
