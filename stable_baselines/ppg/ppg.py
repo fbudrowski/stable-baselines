@@ -489,7 +489,7 @@ class PPG(ActorCriticRLModel):
         return aux_loss, beh_cloning_loss, value_loss
 
     def learn(self, total_timesteps, callback=None, log_interval_policy_phase=8, log_interval_aux_phase=1, tb_log_name="PPG",
-              reset_num_timesteps=True, target_timesteps=None):
+              reset_num_timesteps=True, target_timesteps=None, elapsed_timesteps = None):
         # Transform to callable if needed
         self.learning_rate = get_schedule_fn(self.learning_rate)
         self.cliprange = get_schedule_fn(self.cliprange)
@@ -530,11 +530,14 @@ class PPG(ActorCriticRLModel):
                                                                    )
                     batch_size = self.n_batch // self.nminibatches
                     t_start = time.time()
-                    cur_update = (phase-1) * (self.policy_phases + self.auxiliary_phases) + policy_phase
-                    all_updates = n_phases * (self.policy_phases + self.auxiliary_phases) - 1.0
+
+
+                    cur_update = (phase-1) * (self.policy_phases) + policy_phase
+                    all_updates = n_phases * (self.policy_phases) - 1.0
                     if target_timesteps:
-                        cur_update += (self.policy_phases + self.auxiliary_phases) * (self.num_timesteps // (self.n_batch * self.policy_phases))
-                        all_updates = (self.policy_phases + self.auxiliary_phases) * (target_timesteps // (self.n_batch * self.policy_phases))
+                        cur_update = elapsed_timesteps + (phase-1.0) * (total_timesteps // n_phases) \
+                                     + (policy_phase - 1.0) * (total_timesteps // n_phases // self.policy_phases)
+                        all_updates = target_timesteps
                     frac = max(1.0 - cur_update / all_updates, 0.4)
 
                     lr_now = self.learning_rate(frac)
@@ -646,9 +649,15 @@ class PPG(ActorCriticRLModel):
                                                                    )
                     batch_size = (self.n_batch * self.policy_phases) // self.nminibatches
                     t_start = time.time()
-                    cur_update = (phase - 1) * (self.policy_phases + self.auxiliary_phases) + self.policy_phases + aux_phase
-                    all_updates = n_phases * (self.policy_phases + self.auxiliary_phases)
-                    frac = 1.0 - cur_update / all_updates
+
+                    cur_update = (phase) * (self.policy_phases)
+                    all_updates = n_phases * (self.policy_phases) - 1.0
+                    if target_timesteps:
+                        cur_update = elapsed_timesteps + (phase) * (total_timesteps // n_phases) 
+                        all_updates = target_timesteps
+                    frac = max(1.0 - cur_update / all_updates, 0.4)
+
+
 
                     lr_now = self.learning_rate(frac)
                     cliprange_now = self.cliprange(frac)

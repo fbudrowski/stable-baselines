@@ -39,7 +39,8 @@ def train(env_id, num_timesteps, seed, policy, load_addr=None, save_addr="ppg_br
     for i in range(total_rounds + 1):
         timesteps_to_do = min(timesteps_per_save, num_timesteps - elapsed_timesteps)
         if timesteps_to_do > 0:
-            k = model.learn(total_timesteps=timesteps_to_do, reset_num_timesteps=False, target_timesteps=num_timesteps)
+            k = model.learn(total_timesteps=timesteps_to_do, reset_num_timesteps=False, target_timesteps=num_timesteps,
+                            elapsed_timesteps=elapsed_timesteps)
             print(dir(k))
             elapsed_timesteps += timesteps_to_do
             pathdir = f"{save_addr}_{start_time}_{elapsed_timesteps}"
