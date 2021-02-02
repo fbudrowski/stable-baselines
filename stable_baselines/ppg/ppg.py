@@ -653,7 +653,7 @@ class PPG(ActorCriticRLModel):
                     cur_update = (phase) * (self.policy_phases)
                     all_updates = n_phases * (self.policy_phases) - 1.0
                     if target_timesteps:
-                        cur_update = elapsed_timesteps + (phase) * (total_timesteps // n_phases) 
+                        cur_update = elapsed_timesteps + (phase) * (total_timesteps // n_phases)
                         all_updates = target_timesteps
                     frac = max(1.0 - cur_update / all_updates, 0.4)
 
