@@ -191,6 +191,7 @@ class PPG(ActorCriticRLModel):
         self.rewards_ph = None
         self.old_neglog_pac_ph = None
         self.old_vpred_ph = None
+        # self.old_vpred_joined_ph = None
         self.learning_rate_ph = None
         self.clip_range_ph = None
         self.entropy = None
@@ -262,6 +263,7 @@ class PPG(ActorCriticRLModel):
                     self.rewards_ph = tf.placeholder(tf.float32, [None], name="rewards_ph")
                     self.old_neglog_pac_ph = tf.placeholder(tf.float32, [None], name="old_neglog_pac_ph")
                     self.old_vpred_ph = tf.placeholder(tf.float32, [None], name="old_vpred_ph")
+                    # self.old_vpred_joined_ph = tf.placeholder(tf.float32, [None], name="old_vpred_joined_ph")
                     self.learning_rate_ph = tf.placeholder(tf.float32, [], name="learning_rate_ph")
                     self.clip_range_ph = tf.placeholder(tf.float32, [], name="clip_range_ph")
                     self.stats_eprew_ph = tf.placeholder(tf.float32, [], name="stats_eprew_ph")
@@ -311,11 +313,27 @@ class PPG(ActorCriticRLModel):
                                                                       self.clip_range_ph), tf.float32))
                     loss = self.pg_loss - self.entropy * self.ent_coef + self.vf_loss * self.vf_coef
 
-                    vpred_joint = train_model.joined_value_flat
-                    # print("VPRED", vpred, "VPRED JOINT", vpred_joint)
 
-                    self.aux_loss = .5 * tf.reduce_mean(tf.square(vpred_joint - self.rewards_ph))
-                    self.beh_cloning_loss = .5 * tf.reduce_mean(tf.square(neglogpac - self.old_neglog_pac_ph))
+                    # if self.clip_range_vf_ph is None:
+                    #     # No clipping
+                    #     vpred_joined_clipped = train_model.joined_value_flat
+                    # else:
+                    #     # Clip the different between old and new value
+                    #     # NOTE: this depends on the reward scaling
+                    #     vpred_joined_clipped = self.old_vpred_joined_ph + \
+                    #         tf.clip_by_value(train_model.joined_value_flat - self.old_vpred_joined_ph,
+                    #                          - self.clip_range_vf_ph, self.clip_range_vf_ph)
+                    #
+                    #
+                    vpred_joined = train_model.joined_value_flat
+                    # vf_joined_losses1 = tf.square(vpred_joined - self.rewards_ph)
+                    # vf_joined_losses2 = tf.square(vpred_joined_clipped - self.rewards_ph)
+
+
+
+                    # self.aux_loss = .5 * tf.reduce_mean(tf.maximum(vf_joined_losses1, vf_joined_losses2))
+                    self.aux_loss = .5 * tf.reduce_mean(tf.square(vpred_joined - self.rewards_ph))
+                    self.beh_cloning_loss = tf.reduce_mean(tf.square(neglogpac - self.old_neglog_pac_ph))
 
                     loss_aux = self.aux_loss + self.beh_cloning_coefficient * self.beh_cloning_loss + self.vf_loss * self.vf_coef
 
@@ -358,6 +376,7 @@ class PPG(ActorCriticRLModel):
 
                     tf.summary.scalar('old_neglog_action_probability', tf.reduce_mean(self.old_neglog_pac_ph))
                     tf.summary.scalar('old_value_pred', tf.reduce_mean(self.old_vpred_ph))
+                    # tf.summary.scalar('old_value_pred_joined', tf.reduce_mean(self.old_vpred_joined_ph))
 
                     tf.summary.scalar('eprewmean', tf.reduce_mean(self.stats_eprew_ph))
                     tf.summary.scalar('eplenmean', tf.reduce_mean(self.stats_eplen_ph))
@@ -410,6 +429,7 @@ class PPG(ActorCriticRLModel):
                   self.advs_ph: advs, self.rewards_ph: returns,
                   self.learning_rate_ph: learning_rate, self.clip_range_ph: cliprange,
                   self.old_neglog_pac_ph: neglogpacs, self.old_vpred_ph: values,
+                  # self.old_vpred_joined_ph: values_joined,
                   self.stats_eprew_ph: stats_rew, self.stats_eplen_ph: stats_len}
         if states is not None:
             td_map[self.train_model.states_ph] = states
@@ -454,6 +474,7 @@ class PPG(ActorCriticRLModel):
                   self.advs_ph: advs, self.rewards_ph: returns,
                   self.learning_rate_ph: learning_rate, self.clip_range_ph: cliprange,
                   self.old_neglog_pac_ph: neglogpacs, self.old_vpred_ph: values,
+                  # self.old_vpred_joined_ph: values_joined,
                   self.stats_eprew_ph: old_stats_rew, self.stats_eplen_ph: old_stats_len}
 
         if states is not None:
@@ -574,6 +595,8 @@ class PPG(ActorCriticRLModel):
                                                                                 self.n_batch + start) // batch_size)
                                 end = start + batch_size
                                 mbinds = inds[start:end]
+                                # print("Values", values.shape, "VJ", values_joint.shape)
+
                                 slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
                                 mb_loss_vals.append(self._train_step(lr_now, cliprange_now, *slices, writer=writer,
                                                                      update=timestep, stats_rew=mean_rewards,
@@ -634,6 +657,7 @@ class PPG(ActorCriticRLModel):
                 masks = np.concatenate([rollout[2] for rollout in rollout_buffer], axis=0)
                 actions = np.concatenate([rollout[3] for rollout in rollout_buffer], axis=0)
                 values = np.concatenate([rollout[4] for rollout in rollout_buffer], axis=0)
+                values_joint = np.concatenate([rollout[5] for rollout in rollout_buffer], axis=0)
                 # print("Obs", type(obs), obs.shape, "ob0", rollout[0][0].shape)
                 # print("Returns", returns.shape)
                 # print("Valuese", values.shape, "dones", masks.shape)
@@ -667,7 +691,7 @@ class PPG(ActorCriticRLModel):
                     if not self.runner.continue_training:
                         break
 
-                    self.ep_info_buf.extend(ep_infos)
+                    # self.ep_info_buf.extend(ep_infos)
                     mb_loss_vals = []
                     if states is None:  # nonrecurrent version
                         update_fac = max((self.n_batch * self.policy_phases) // self.nminibatches // self.noptepochs, 1)
@@ -800,6 +824,7 @@ class Runner(AbstractEnvRunner):
             - masks: (numpy bool) whether an episode is over or not
             - actions: (np.ndarray) the actions
             - values: (np.ndarray) the value function output
+            - values_joint: (np.ndarray) the output of the value head
             - negative log probabilities: (np.ndarray)
             - states: (np.ndarray) the internal states of the recurrent policies
             - infos: (dict) the extra information of the model
@@ -830,7 +855,7 @@ class Runner(AbstractEnvRunner):
                 if self.callback.on_step() is False:
                     self.continue_training = False
                     # Return dummy values
-                    return [None] * 9
+                    return [None] * 10
 
             for info in infos:
                 maybe_ep_info = info.get('episode')
@@ -861,8 +886,8 @@ class Runner(AbstractEnvRunner):
             mb_advs[step] = last_gae_lam = delta + self.gamma * self.lam * nextnonterminal * last_gae_lam
         mb_returns = mb_advs + mb_values
 
-        mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward = \
-            map(swap_and_flatten, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs, true_reward))
+        mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_values_joint, mb_neglogpacs, true_reward = \
+            map(swap_and_flatten, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_values_joint, mb_neglogpacs, true_reward))
 
         return mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_values_joint, mb_neglogpacs, mb_states, ep_infos, true_reward
 

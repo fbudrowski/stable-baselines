@@ -32,7 +32,7 @@ def train(env_id, num_timesteps, seed, policy, load_addr=None, save_addr="ppg_br
                      full_tensorboard_log=logdir if full_logs else False, tensorboard_log=logdir)
 
     # timesteps_per_save = timesteps_per_save or (num_timesteps // 2)
-    total_rounds = num_timesteps // timesteps_per_save
+    total_rounds = (num_timesteps // timesteps_per_save) if timesteps_per_save else 1
     elapsed_timesteps = 0
     start_time = f'{datetime.now(timezone.utc).strftime("%Y-%m-%d--%H-%M-%S-%Z")}'
 
