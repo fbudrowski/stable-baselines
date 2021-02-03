@@ -154,28 +154,30 @@ class PPO2(ActorCriticRLModel):
                     vpred = train_model.value_flat
 
                     # Value function clipping: not present in the original PPO
-                    if self.cliprange_vf is None:
-                        # Default behavior (legacy from OpenAI baselines):
-                        # use the same clipping as for the policy
-                        self.clip_range_vf_ph = self.clip_range_ph
-                        self.cliprange_vf = self.cliprange
-                    elif isinstance(self.cliprange_vf, (float, int)) and self.cliprange_vf < 0:
-                        # Original PPO implementation: no value function clipping
-                        self.clip_range_vf_ph = None
-                    else:
-                        # Last possible behavior: clipping range
-                        # specific to the value function
-                        self.clip_range_vf_ph = tf.placeholder(tf.float32, [], name="clip_range_vf_ph")
+                    # if self.cliprange_vf is None:
+                    #     # Default behavior (legacy from OpenAI baselines):
+                    #     # use the same clipping as for the policy
+                    #     self.clip_range_vf_ph = self.clip_range_ph
+                    #     self.cliprange_vf = self.cliprange
+                    # elif isinstance(self.cliprange_vf, (float, int)) and self.cliprange_vf < 0:
+                    #     # Original PPO implementation: no value function clipping
+                    #     self.clip_range_vf_ph = None
+                    # else:
+                    #     # Last possible behavior: clipping range
+                    #     # specific to the value function
+                    #     self.clip_range_vf_ph = tf.placeholder(tf.float32, [], name="clip_range_vf_ph")
 
-                    if self.clip_range_vf_ph is None:
-                        # No clipping
-                        vpred_clipped = train_model.value_flat
-                    else:
-                        # Clip the different between old and new value
-                        # NOTE: this depends on the reward scaling
-                        vpred_clipped = self.old_vpred_ph + \
-                            tf.clip_by_value(train_model.value_flat - self.old_vpred_ph,
-                                             - self.clip_range_vf_ph, self.clip_range_vf_ph)
+                    # if self.clip_range_vf_ph is None:
+                    #     # No clipping
+                    #     vpred_clipped = train_model.value_flat
+                    # else:
+                    #     # Clip the different between old and new value
+                    #     # NOTE: this depends on the reward scaling
+                    #     vpred_clipped = self.old_vpred_ph + \
+                    #         tf.clip_by_value(train_model.value_flat - self.old_vpred_ph,
+                    #                          - self.clip_range_vf_ph, self.clip_range_vf_ph)
+
+                    vpred_clipped = train_model.value_flat
 
                     vf_losses1 = tf.square(vpred - self.rewards_ph)
                     vf_losses2 = tf.square(vpred_clipped - self.rewards_ph)
