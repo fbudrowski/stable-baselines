@@ -40,6 +40,7 @@ def train(env_id, num_timesteps, seed, policy, load_addr=None, save_addr="ppo2_m
         timesteps_to_do = min(timesteps_per_save, num_timesteps - elapsed_timesteps)
         if timesteps_to_do > 0:
             model.learn(total_timesteps=timesteps_to_do, reset_num_timesteps=False, target_timesteps=num_timesteps)
+                        # elapsed_timesteps=elapsed_timesteps)
             elapsed_timesteps += timesteps_to_do
             pathdir = f"{save_addr}_{start_time}_{elapsed_timesteps}"
             Path(pathdir).mkdir(parents=True, exist_ok=True)
